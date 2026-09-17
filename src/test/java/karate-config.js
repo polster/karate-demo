@@ -10,6 +10,10 @@ function fn() {
   var config = {
     env: env,
     baseUrl: java.lang.System.getProperty('mock.server.url', 'http://localhost:8080'),
+    // 'nats.server.url' is injected the same way mock.server.url is: scripts/nats-test.sh passes
+    // it via -D, pointing at the NATS server started by docker-compose.nats.yml; defaults to the
+    // standard local NATS port for ad-hoc `mvn test -Dtest=demo.nats.TestNatsRunner` runs
+    natsUrl: java.lang.System.getProperty('nats.server.url', 'nats://localhost:4222'),
     connectTimeout: 5000,
     readTimeout: 5000
   };

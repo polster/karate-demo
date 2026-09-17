@@ -9,6 +9,7 @@ be run end-to-end with nothing to install beyond a JDK and Maven. It covers:
 . *Load testing* - the _same_ feature files reused as a Gatling load test, Karate's
   headline benefit over hand-rolling a separate performance test suite.
 . *CI automation* - two GitHub Actions workflows, one automatic and one on-demand.
+. *Message broker testing* - a local-only showcase of testing NATS via Karate, demonstrating both pub/sub and request/reply patterns.
 
 There is no external API and nothing to deploy: the "API under test" is itself a Karate
 feature file (`src/test/java/mock/users-api.feature`), started as a
@@ -20,6 +21,11 @@ _server_ (the mock) at the same time.
 For the `make` targets, the mock runs as a local Docker image (built from the bundled
 `Dockerfile`, started via `docker-compose.yml`) so both the functional tests and the load test
 exercise the exact same containerized service on a fixed port.
+
+Separately, there's also a small, local-only showcase of testing a *message broker* instead of
+an HTTP API: the same Karate framework, driving link:https://nats.io[NATS] via a thin Java
+helper (`support/nats/`), demonstrating both the pub/sub and request/reply patterns. See
+<<Running the NATS messaging tests>> - it's not part of `make demo` and not covered by CI.
 
 == Prerequisites
 
@@ -60,8 +66,17 @@ make help    # list all available targets
 | `demo`
 | `test-ci` then `load-test`
 
+| `test-nats`
+| Start NATS via Docker Compose, run the NATS functional tests (pub/sub + request/reply), stop NATS
+
+| `nats-start`
+| Start a plain NATS server via Docker Compose, wait until healthy
+
+| `nats-stop`
+| Stop the NATS container
+
 | `clean`
-| `mvn clean`, plus stop/remove any lingering mock API container
+| `mvn clean`, plus stop/remove any lingering mock API and NATS containers
 |===
 
 == Project layout
@@ -69,12 +84,16 @@ make help    # list all available targets
 ----
 Dockerfile                      # builds the mock API image (mvn + the test classpath, runs MockServerMain)
 docker-compose.yml               # runs that image on a fixed port, with a healthcheck
+docker-compose.nats.yml           # runs a plain NATS server via Docker Compose, with a healthcheck
 Makefile
 scripts/
   mock-start.sh                 # docker compose up --build --wait
   mock-stop.sh                   # docker compose down
   functional-test.sh             # mock-start -> mvn test -Dmock.server.url=... -> mock-stop
   load-test.sh                   # mock-start -> mvn gatling:test -> mock-stop, cleans up on failure too
+  nats-start.sh                   # docker compose (nats) up --wait
+  nats-stop.sh                    # docker compose (nats) down
+  nats-test.sh                    # nats-start -> mvn test -Dtest=demo.nats.TestNatsRunner -> nats-stop
 pom.xml
 src/test/java/
   karate-config.js           # environment-driven config
@@ -84,6 +103,11 @@ src/test/java/
     MockServerLifecycle.java  # starts/stops the mock once per functional test run, unless an
                                # external mock.server.url (the Docker container) is already set
     MockServerMain.java       # runs the mock standalone, for the load test / Docker image
+    nats/
+      NatsClient.java          # synchronous facade over the NATS Java client (jnats)
+      NatsSubscription.java    # wraps a synchronous pub/sub subscription
+      NatsResponder.java       # fake "orders" responder for the request/reply demo
+      NatsLifecycle.java       # opens the shared NATS connection once per test run
   demo/users/
     create-user.feature       # @ignore'd helper, reused via `call` from other features
     users-create.feature       # create: happy path + data-driven validation (Examples)
@@ -91,6 +115,10 @@ src/test/java/
     users-update.feature       # update
     users-delete.feature       # delete + confirm gone
     fixtures/invalid-user.json # example payload fixture, read() from an Examples row
+  demo/nats/
+    notifications-pubsub.feature  # pub/sub: publish, assert a subscriber receives it
+    orders-request-reply.feature  # request/reply: known + unknown order status
+    TestNatsRunner.java            # JUnit5 runner, @ExtendWith(NatsLifecycle.class)
 src/test/scala/perf/
   UsersSimulation.scala        # Gatling simulation that replays the create/read features
 .github/workflows/
@@ -171,6 +199,47 @@ make mock-stop
 scenarios used by the functional suite (selected by a `@name=...` tag) under a ramping load
 profile - there is no separate load-test scripting of the API calls themselves.
 
+== Running the NATS messaging tests
+
+A separate, local-only showcase of testing a message broker instead of an HTTP API. Karate has
+no built-in NATS support, so `support/nats/NatsClient.java` is a small synchronous facade over
+the official NATS Java client (`io.nats:jnats`), called from `.feature` files via Karate's Java
+interop - the same technique Karate's own examples use for non-HTTP protocols like Kafka.
+
+Two patterns, one feature file each:
+
+* *Pub/sub* (`demo/nats/notifications-pubsub.feature`) - subscribe to a subject, publish to it,
+  assert the subscriber receives the exact payload.
+* *Request/reply* (`demo/nats/orders-request-reply.feature`) - send a request, assert on the
+  synchronous reply. Since there's no separate "orders" service, a small in-memory responder
+  (`support/nats/NatsResponder.java`) plays that role - the NATS equivalent of
+  `mock/users-api.feature`.
+
+`support/nats/NatsLifecycle.java` is the NATS counterpart to `MockServerLifecycle`: it opens one
+shared connection for the whole test run (and starts the fake responder), closing both when the
+run finishes. Unlike the HTTP mock there's no in-process fallback - NATS is always started via
+Docker Compose (`docker-compose.nats.yml`).
+
+[source,shell]
+----
+make test-nats     # nats-start -> mvn test -Dtest=demo.nats.TestNatsRunner -> nats-stop
+make nats-start     # start a plain NATS server via Docker Compose, wait until healthy
+make nats-stop      # stop it
+----
+
+This suite is deliberately excluded from plain `mvn test` (see the `maven-surefire-plugin`
+`<includes>` in `pom.xml`), since it always needs a running NATS server. Run it explicitly:
+
+[source,shell]
+----
+make nats-start
+mvn test -Dtest=demo.nats.TestNatsRunner -Dkarate.env=dev -Dnats.server.url=nats://localhost:4222
+make nats-stop
+----
+
+This is functional-only - there is no NATS load test in this demo, and neither GitHub Actions
+workflow covers it (see below).
+
 == GitHub Actions
 
 * *`functional-tests.yml`* runs on every push/PR to `main`/`develop`: `mvn test -Dkarate.env=ci`,
@@ -180,6 +249,8 @@ profile - there is no separate load-test scripting of the API calls themselves.
   starts the mock API in the background, waits for it to respond, runs the Gatling
   simulation, stops the mock API, and uploads the Gatling HTML report as a build artifact.
 
+Neither workflow runs the NATS showcase above - it's local-only for now.
+
 == Adapting this to a real API
 
 Swapping the bundled mock for a real service mainly touches `karate-config.js`: replace the
@@ -188,3 +259,6 @@ Swapping the bundled mock for a real service mainly touches `karate-config.js`: 
 `docker-compose.yml`. Everything else - the CRUD feature files, the reusable `call`-based
 helper, the Scenario Outline, the Gatling simulation and both workflows - carries over
 unchanged, since none of it actually depends on the API under test being a mock.
+
+The same applies to the NATS showcase: point `NatsClient.connect(...)` at a real broker URL and
+drop `NatsResponder` (a real service would answer requests instead).

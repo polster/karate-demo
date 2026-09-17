@@ -19,6 +19,7 @@
         <!-- newer 2.13 patch than the one karate-gatling itself compiles against (2.13.9), for
              JDK 17+ compiler compatibility - safe because 2.13.x is binary-compatible across patches -->
         <scala.version>2.13.16</scala.version>
+        <nats.version>2.20.4</nats.version>
     </properties>
 
     <dependencies>
@@ -49,6 +50,12 @@
             <version>${scala.version}</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>io.nats</groupId>
+            <artifactId>jnats</artifactId>
+            <version>${nats.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -67,6 +74,14 @@
                 <version>3.2.5</version>
                 <configuration>
                     <useModulePath>false</useModulePath>
+                    <!-- demo.nats.TestNatsRunner is deliberately excluded from plain `mvn test`: it
+                         needs a running NATS server (no in-process fallback exists), unlike the
+                         HTTP suite's MockServerLifecycle. Run it explicitly via
+                         `-Dtest=demo.nats.TestNatsRunner` (wired up by scripts/nats-test.sh /
+                         `make test-nats`), which overrides this filter for that one invocation. -->
+                    <includes>
+                        <include>**/TestUsersRunner.java</include>
+                    </includes>
                 </configuration>
             </plugin>
             <plugin>

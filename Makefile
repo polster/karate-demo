@@ -6,7 +6,7 @@ export GATLING_RAMP_SECONDS ?= 10
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test test-dev test-ci mock-start mock-stop load-test demo clean
+.PHONY: help test test-dev test-ci mock-start mock-stop load-test nats-start nats-stop test-nats demo clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -29,8 +29,18 @@ mock-stop: ## Stop the mock API container started via mock-start
 load-test: ## Start the mock, run the Gatling load test, stop the mock (vars: GATLING_USERS, GATLING_RAMP_SECONDS)
 	@scripts/load-test.sh
 
+nats-start: ## Start a plain NATS server via Docker Compose, wait until healthy
+	@scripts/nats-start.sh
+
+nats-stop: ## Stop the NATS container started via nats-start
+	@scripts/nats-stop.sh
+
+test-nats: ## Run the NATS functional Karate tests (pub/sub + request/reply) via Docker Compose
+	@scripts/nats-test.sh dev
+
 demo: test-ci load-test ## Run the full demo: functional tests, then the load test
 
 clean: ## Remove build output and stop/remove any lingering mock API container
 	mvn clean
 	@docker compose down --remove-orphans 2>/dev/null || true
+	@docker compose -f docker-compose.nats.yml down --remove-orphans 2>/dev/null || true

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>karate-demo</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>karate-demo</name>
+    <description>Hands-on demo of the Karate framework: parameterized configuration, functional API testing, load testing with Gatling, and CI automation via GitHub Actions.</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>17</maven.compiler.release>
+        <karate.version>1.4.1</karate.version>
+        <!-- newer 2.13 patch than the one karate-gatling itself compiles against (2.13.9), for
+             JDK 17+ compiler compatibility - safe because 2.13.x is binary-compatible across patches -->
+        <scala.version>2.13.16</scala.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.intuit.karate</groupId>
+            <artifactId>karate-junit5</artifactId>
+            <version>${karate.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.intuit.karate</groupId>
+            <artifactId>karate-gatling</artifactId>
+            <version>${karate.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <!-- avoid a netty-codec-http version clash with karate-core's own Netty-based MockServer -->
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-codec-http</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- overrides the older 2.13.9 that karate-gatling itself depends on, so the Scala
+             compiler bridge works reliably on JDK 17+ (2.13.x is binary-compatible across patches) -->
+        <dependency>
+            <groupId>org.scala-lang</groupId>
+            <artifactId>scala-library</artifactId>
+            <version>${scala.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <testResources>
+            <testResource>
+                <directory>src/test/java</directory>
+                <excludes>
+                    <exclude>**/*.java</exclude>
+                </excludes>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <useModulePath>false</useModulePath>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>net.alchim31.maven</groupId>
+                <artifactId>scala-maven-plugin</artifactId>
+                <version>4.9.2</version>
+                <configuration>
+                    <scalaVersion>${scala.version}</scalaVersion>
+                    <args>
+                        <arg>-language:postfixOps</arg>
+                    </args>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!-- NOT bound to any lifecycle phase on purpose: `mvn test` must stay fast and
+                     only run the functional Karate suite. The load test is triggered explicitly
+                     via `mvn test-compile gatling:test` (see load-test.yml / README). -->
+                <groupId>io.gatling</groupId>
+                <artifactId>gatling-maven-plugin</artifactId>
+                <version>4.3.4</version>
+                <configuration>
+                    <disableCompiler>true</disableCompiler>
+                    <runMultipleSimulations>true</runMultipleSimulations>
+                </configuration>
+            </plugin>
+            <plugin>
+                <!-- starts the bundled mock API standalone so Gatling (a separate JVM process)
+                     has something to hit; invoked explicitly via `mvn test-compile exec:java` -->
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <mainClass>support.MockServerMain</mainClass>
+                    <classpathScope>test</classpathScope>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
